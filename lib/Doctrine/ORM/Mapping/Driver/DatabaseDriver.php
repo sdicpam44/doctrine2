@@ -436,7 +436,7 @@ class DatabaseDriver implements MappingDriver
         return $fieldMapping;
     }
 
-    /**
+     /**
      * Build to one (one to one, many to one) association mapping from class metadata.
      *
      * @param \Doctrine\ORM\Mapping\ClassMetadataInfo $metadata
@@ -447,6 +447,9 @@ class DatabaseDriver implements MappingDriver
         $primaryKeys = $this->getTablePrimaryKeys($this->tables[$tableName]);
         $foreignKeys = $this->getTableForeignKeys($this->tables[$tableName]);
 
+        $assocParent = [];
+        $assocArray = [];
+        
         foreach ($foreignKeys as $foreignKey) {
             $foreignTableName   = $foreignKey->getForeignTableName();
             $fkColumns          = $foreignKey->getColumns();
@@ -476,9 +479,92 @@ class DatabaseDriver implements MappingDriver
             if ( ! array_diff($fkColumns, $primaryKeys)) {
                 $metadata->mapOneToOne($associationMapping);
             } else {
-                $metadata->mapManyToOne($associationMapping);
+                $inversedField = $this->getFieldNameForColumn($tableName, $tableName, true);
+                
+                $tEntity = $associationMapping['targetEntity'];
+                
+                if(array_key_exists($tEntity.'.'.$inversedField,$assocParent)) {
+                    $assocParent[$tEntity.'.'.$inversedField]++;
+                }
+                else {
+                    $assocParent[$tEntity.'.'.$inversedField] = 1;
+                }
+                
+                //no inversed by on the same table
+                if($foreignTableName !== $tableName) {
+                    $associationMapping['inversedBy'] = $inversedField;
+                }
+                
+                $assocArray[] = $associationMapping;
+                
             }
         }
+        
+        foreach($assocArray as $assoc) {
+            //never use inversedby on the same field twice
+            if(array_key_exists('inversedBy',$assoc) && $assocParent[$assoc['targetEntity'].'.'.$assoc['inversedBy']] > 1) {
+                $assoc['inversedBy'] = null;
+            }
+            
+            $metadata->mapManyToOne($assoc);
+        }
+        
+        
+        foreach ($this->tables as $tableCandidate) {
+            if ($this->_sm->getDatabasePlatform()->supportsForeignKeyConstraints()) {
+                $foreignKeysCandidate = $tableCandidate->getForeignKeys();
+            } else {
+                $foreignKeysCandidate = array();
+            }
+            
+            $assocExist = array();
+            
+            foreach ($foreignKeysCandidate as $foreignKey) {
+                $foreignTable = $foreignKey->getForeignTableName();
+
+                if ($foreignTable == $tableName && $tableCandidate->getName() !== $tableName && !isset($this->manyToManyTables[$tableCandidate->getName()])) {
+
+                    $fkCols = $foreignKey->getForeignColumns();
+                    $cols = $foreignKey->getColumns();
+
+
+                    $localColumn = current($cols);
+
+                    $associationMapping = array();
+                    $associationMapping['fieldName'] = $this->getFieldNameForColumn($tableCandidate->getName(), $tableCandidate->getName(), true);
+                    $associationMapping['targetEntity'] = $this->getClassNameForTable($tableCandidate->getName());
+                    $associationMapping['mappedBy'] = $this->getFieldNameForColumn($tableCandidate->getName(), $localColumn, true);
+
+                    try {
+                        $primaryKeyColumns = $tableCandidate->getPrimaryKey()->getColumns();
+                        if (count($primaryKeyColumns) == 1) {
+                            $indexColumn = current($primaryKeyColumns);
+                            $associationMapping['indexBy'] = $indexColumn;
+                        }
+                    } catch (SchemaException $e) {
+
+                    }
+                    
+                    if(!array_key_exists($associationMapping['fieldName'],$assocExist)) {
+                       
+                        $assocExist[$associationMapping['fieldName']] = $associationMapping ;
+                    }
+                    else {
+                        //never add onetomany association on a table linked more than once
+                        unset($assocExist[$associationMapping['fieldName']]);
+                    }
+                }
+            }
+            
+            //add all valid association mapping
+            foreach($assocExist as $key => $value) {
+                $metadata->mapOneToMany($value);
+            }
+             
+        }
+        
+        
+        
     }
 
     /**
