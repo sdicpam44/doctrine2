@@ -2118,6 +2118,14 @@ class ClassMetadataInfo implements ClassMetadata
         if (isset($overrideMapping['joinTable'])) {
             $mapping['joinTable'] = $overrideMapping['joinTable'];
         }
+        
+        if(isset($overrideMapping['orderBy'])) {
+            $mapping['orderBy'] = $overrideMapping['orderBy'];
+        }
+        
+        if(isset($overrideMapping['fetch'])) {
+            $mapping['fetch'] = $overrideMapping['fetch'];
+        }
 
         $mapping['joinColumnFieldNames']        = null;
         $mapping['joinTableColumns']            = null;
